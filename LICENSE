@@ -1,0 +1,22 @@
+Copyright (c) 2026 Jinhua Xu (许金华) and Jinghao Zhang. All rights reserved.
+
+This website (https://creator-hook-lab.pages.dev), its agent-network design (including the .hocon and .json
+agent network files), its pages, scripts, styles, prompts and content are the
+original work of the project team: Jinhua Xu (许金华) and Jinghao Zhang.
+
+No license is granted to copy, modify, redistribute, re-publish, re-host or
+submit this site or its code, in whole or in part, without prior written
+permission from the authors.
+
+Viewing and using the live site in a web browser, and calling its published
+agent network from other agentic websites as the open agentic web specification
+intends, is permitted.
+
+Third-party components keep their own licenses and are not covered by the
+reservation above:
+- runtime/ : the nsDeploy / neuro-san-web browser runtime from
+  https://github.com/cognizant-ai-labs/agentic-web, licensed under the
+  Apache License 2.0 (see runtime/LICENSE.txt), with modifications by the
+  project team that are marked in the files.
+
+Contact for permission: zhangjihao05@gmail.com

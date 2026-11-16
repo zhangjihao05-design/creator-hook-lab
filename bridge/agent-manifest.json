@@ -1,0 +1,10 @@
+{
+  "networks": [
+    {
+      "name": "hook_lab"
+    }
+  ],
+  "actions": {
+    "version": 1
+  }
+}

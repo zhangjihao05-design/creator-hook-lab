@@ -1,0 +1,292 @@
+// llm.js — the LlmClient intrinsic: an OpenAI-compatible chat-completions client.
+
+import { assertModelForRouter, normalizeModelName } from "./model.js";
+import { ProviderError } from "./provider-error.js";
+
+// Creator Agent Studio patch: retry timing for rate-limited providers.
+const MAX_RETRY_WAIT_MS = 120_000;
+// A 429 waits much longer in total: 15s, 30s, 60s, 120s (or the provider's own hint when
+// it is longer), about four minutes, before the call counts as failed.
+const MAX_429_WAIT_MS = 240_000;
+const RATE_STEPS_MS = [15_000, 30_000, 60_000, 120_000];
+function retryDelayMs(resp, text, attempt) {
+  const header = Number(resp.headers?.get?.("retry-after"));
+  const m = /"retryDelay"\s*:\s*"(\d+(?:\.\d+)?)s"/.exec(text || "");
+  const hint = header > 0 ? header * 1000 + 500 : m ? Number(m[1]) * 1000 + 1000 : 0;
+  if (resp.status === 429) return Math.min(Math.max(hint, RATE_STEPS_MS[Math.min(attempt, RATE_STEPS_MS.length - 1)]), 120_000);
+  if (hint) return Math.min(hint, 60_000);
+  return Math.min(3000 * 2 ** attempt, 30_000);
+}
+// After the first 429 in this tab, space request starts about 4s apart (15 a minute,
+// the usual free-tier rate) so later calls stop tripping the limit.
+const pacing = { ms: 0, next: 0 };
+async function takeSlot() {
+  if (!pacing.ms) return;
+  const now = Date.now();
+  const at = Math.max(now, pacing.next);
+  pacing.next = at + pacing.ms;
+  if (at > now) await new Promise((r) => setTimeout(r, at - now));
+}
+
+
+function hostOf(url) {
+  try { return new URL(url).host; } catch { return url || "?"; }
+}
+
+export function isMockResponse(configuredMock, routeKind, model) {
+  return !!configuredMock || routeKind === "mock" || /neuro-san-mock/.test(model || "");
+}
+
+export function browserMockCompletion(messages = [], tools = []) {
+  const called = new Set(messages.filter((m) => m?.role === "tool" && m.name).map((m) => m.name));
+  const available = (tools || []).map((tool) => tool?.function).filter((fn) => fn?.name);
+  const next = available.find((fn) => !called.has(fn.name));
+  const lastUser = [...messages].reverse().find((m) => m?.role === "user");
+  const request = typeof lastUser?.content === "string" ? lastUser.content : JSON.stringify(lastUser?.content || "");
+  if (next) {
+    const args = {};
+    const schema = next.parameters || {};
+    for (const name of schema.required || []) args[name] = request;
+    for (const name of ["request", "inquiry", "search_terms", "query", "input"]) {
+      if (schema.properties?.[name] || (schema.required || []).includes(name)) args[name] ??= request;
+    }
+    return {
+      content: "",
+      toolCalls: [{
+        id: `call_${next.name}`,
+        type: "function",
+        function: { name: next.name, arguments: JSON.stringify(args) },
+      }],
+      finishReason: "tool_calls",
+      usage: null,
+      model: "neuro-san-mock-browser",
+    };
+  }
+  const results = messages.filter((m) => m?.role === "tool").map((m) => String(m.content || ""));
+  const content = results.length
+    ? `(mock summary) Based on the tools I consulted: ${results.join(" ").slice(0, 1200)}`
+    : "(mock) I have no grounded tool output to summarize for this request.";
+  return { content, toolCalls: [], finishReason: "stop", usage: null, model: "neuro-san-mock-browser" };
+}
+
+//
+// In production this is @langchain/openai's ChatOpenAI pointed at a router base
+// URL. Here it is a direct fetch to any OpenAI-compatible endpoint (LiteLLM,
+// OpenRouter, vLLM, Ollama, Docker Model Runner, or the demo mock router). The
+// BYOK key is never put in the URL and is sent only to the chosen router as
+// Authorization.
+
+export class LlmClient {
+  constructor({ baseUrl, apiKey, trace, mock }) {
+    this.baseUrl = (baseUrl || "").replace(/\/$/, "");
+    this.apiKey = apiKey || "";
+    this.trace = trace;
+    this.mock = !!mock;
+  }
+
+  // messages: [{role, content, tool_calls?, tool_call_id?, name?}]
+  // tools: [{type:'function', function:{name, description, parameters}}]
+  // onContentDelta: (text) => void  — streamed natural-language tokens
+  async chat({ model, messages, tools, toolChoice, origin, parentSpan, onContentDelta, signal }) {
+    model = normalizeModelName(model);
+    // A real (non-mock) router with no API key: refuse rather than forward the
+    // placeholder "demo" to a live provider (which returns a confusing 401). This
+    // happens e.g. when a shared/reloaded URL keeps the proxy router but no saved
+    // BYOK profile/key is available in this browser.
+    if (!this.mock && (!this.apiKey || this.apiKey === "demo")) {
+      throw new Error(`An AI provider key is required for ${hostOf(this.baseUrl) || "the configured provider"}. Open ⚙ AI model settings, paste your key, then select Save and start. Your key stays in this browser and is sent only to the configured provider.`);
+    }
+    assertModelForRouter(model, this.mock, hostOf(this.baseUrl));
+    const span = this.trace?.start("model_call", {
+      parent: parentSpan,
+      origin,
+      model,
+      mock: this.mock,
+      routerHost: hostOf(this.baseUrl),
+      endpoint: `${this.baseUrl}/chat/completions`,
+      keySource: this.apiKey ? "local BYOK (not shown)" : "none",
+      toolNames: (tools || []).map((t) => t.function.name),
+    });
+
+    const body = {
+      model,
+      messages,
+      stream: true,
+    };
+    if (tools && tools.length) {
+      body.tools = tools;
+      body.tool_choice = toolChoice || "auto";
+    }
+
+    try {
+      if (this.baseUrl === "browser://mock") {
+        signal?.throwIfAborted?.();
+        const result = browserMockCompletion(messages, tools);
+        if (result.content) {
+          onContentDelta?.(result.content);
+          this.trace?.update(span, { streamChunk: result.content });
+        }
+        this.trace?.end(span, {
+          finishReason: result.finishReason,
+          contentChars: result.content.length,
+          toolCalls: result.toolCalls.map((t) => t.function.name),
+          usage: null,
+          mock: true,
+          verifiedReal: false,
+          respModel: result.model,
+          routeKind: "browser-mock",
+        });
+        return result;
+      }
+      const headers = {
+        "Content-Type": "application/json",
+        ...(this.apiKey ? { Authorization: `Bearer ${this.apiKey}` } : {}),
+      };
+      if (hostOf(this.baseUrl) === "api.anthropic.com") {
+        headers["anthropic-dangerous-direct-browser-access"] = "true";
+      }
+      // Creator Agent Studio patch: free tiers answer 429/503 under load. Wait as long as
+      // the provider asks (Retry-After or Gemini's retryDelay), else back off, for up to
+      // about two minutes in total, so a per-minute limit never reaches the visitor.
+      // A daily quota cannot recover by waiting, so that fails at once.
+      let resp;
+      let errorText = "";
+      let waited = 0;
+      for (let attempt = 0; ; attempt++) {
+        await takeSlot();
+        try {
+          resp = await fetch(`${this.baseUrl}/chat/completions`, {
+            method: "POST",
+            headers,
+            body: JSON.stringify(body),
+            signal,
+          });
+        } catch (netErr) {
+          // A dropped connection is retried like a 503; an abort (steering) is not.
+          if (netErr?.name === "AbortError" || signal?.aborted) throw netErr;
+          const delayMs = Math.min(2000 * 2 ** attempt, 20_000);
+          if (attempt >= 5 || waited + delayMs > MAX_RETRY_WAIT_MS) throw netErr;
+          this.trace?.note("llm_retry", { parent: span, status: "network", attempt: attempt + 1, waitSeconds: Math.round(delayMs / 1000) });
+          await new Promise((r) => setTimeout(r, delayMs));
+          waited += delayMs;
+          continue;
+        }
+        if (resp.ok || ![429, 500, 502, 503, 504].includes(resp.status)) break;
+        errorText = await resp.text().catch(() => "");
+        // A daily quota may still be a per-minute limit in disguise, so it is retried too.
+        if (resp.status === 429) pacing.ms = 4000;
+        const delayMs = retryDelayMs(resp, errorText, attempt);
+        const budget = resp.status === 429 ? MAX_429_WAIT_MS : MAX_RETRY_WAIT_MS;
+        if (attempt >= 7 || waited + delayMs > budget) break;
+        this.trace?.note("llm_retry", { parent: span, status: resp.status, attempt: attempt + 1, waitSeconds: Math.round(delayMs / 1000) });
+        // Tests shrink every wait with globalThis.__nsRetryScale; real pages leave it unset.
+        await new Promise((r) => setTimeout(r, delayMs * (globalThis.__nsRetryScale ?? 1)));
+        waited += delayMs;
+        signal?.throwIfAborted?.();
+      }
+      if (!resp.ok) {
+        const txt = errorText || await resp.text().catch(() => "");
+        throw new Error(`LLM HTTP ${resp.status}: ${txt.slice(0, 300)}`);
+      }
+
+      const routeKind = resp.headers.get("X-Nsdeploy-LLM-Route") || "";
+      const result = await this._readSse(resp, onContentDelta, span, signal);
+      const respMock = isMockResponse(this.mock, routeKind, result.model);
+      this.trace?.end(span, {
+        finishReason: result.finishReason,
+        contentChars: result.content.length,
+        toolCalls: result.toolCalls.map((t) => t.function.name),
+        usage: result.usage,
+        mock: respMock,
+        verifiedReal: !respMock && !!result.model,
+        respModel: result.model,
+        routeKind,
+      });
+      return result;
+    } catch (err) {
+      const friendlyError = ProviderError.friendly(err, this.baseUrl);
+      if (err?.name === "AbortError" && signal?.aborted) {
+        this.trace?.end(span, { status: "steered", interrupted: true });
+      } else {
+        this.trace?.fail(span, friendlyError);
+      }
+      throw friendlyError;
+    }
+  }
+
+  async _readSse(resp, onContentDelta, span, signal) {
+    const reader = resp.body.getReader();
+    const cancel = () => reader.cancel(signal?.reason).catch(() => {});
+    signal?.addEventListener("abort", cancel, { once: true });
+    if (signal?.aborted) {
+      await cancel();
+      signal.throwIfAborted();
+    }
+    const dec = new TextDecoder();
+    let buf = "";
+    let content = "";
+    const toolCalls = []; // assembled by index
+    let finishReason = null;
+    let usage = null;
+    let model = null;
+
+    const handleChunk = (json) => {
+      if (json.model) model = json.model;
+      if (json.usage) usage = json.usage;
+      const choice = json.choices?.[0];
+      if (!choice) return;
+      const delta = choice.delta || {};
+      if (delta.content) {
+        content += delta.content;
+        if (!signal?.aborted) {
+          onContentDelta?.(delta.content);
+          this.trace?.update(span, { streamChunk: delta.content });
+        }
+      }
+      if (delta.tool_calls) {
+        for (const tc of delta.tool_calls) {
+          // Gemini's OpenAI-compatible stream can send parallel calls as whole chunks with the same
+          // (or no) index; a new id means a new call, otherwise they get merged into one bad call.
+          let idx = tc.index ?? (toolCalls.length ? toolCalls.length - 1 : 0);
+          if (tc.id && toolCalls[idx]?.id && toolCalls[idx].id !== tc.id) {
+            const found = toolCalls.findIndex((c) => c?.id === tc.id);
+            idx = found >= 0 ? found : toolCalls.length;
+          }
+          if (!toolCalls[idx]) toolCalls[idx] = { id: tc.id, type: "function", function: { name: "", arguments: "" } };
+          if (tc.id) toolCalls[idx].id = tc.id;
+          if (tc.function?.name) toolCalls[idx].function.name += tc.function.name;
+          if (tc.function?.arguments) toolCalls[idx].function.arguments += tc.function.arguments;
+          // Gemini 3 (OpenAI-compatible API) needs extra_content.google.thought_signature sent back with each call.
+          if (tc.extra_content) toolCalls[idx].extra_content = tc.extra_content;
+        }
+      }
+      if (choice.finish_reason) finishReason = choice.finish_reason;
+    };
+
+    try {
+      for (;;) {
+        const { value, done } = await reader.read();
+        signal?.throwIfAborted();
+        if (done) break;
+        buf += dec.decode(value, { stream: true });
+        let nl;
+        while ((nl = buf.indexOf("\n")) >= 0) {
+          const line = buf.slice(0, nl).trim();
+          buf = buf.slice(nl + 1);
+          if (!line || !line.startsWith("data:")) continue;
+          const payload = line.slice(5).trim();
+          if (payload === "[DONE]") continue;
+          try {
+            handleChunk(JSON.parse(payload));
+          } catch {
+            /* ignore malformed keep-alive lines */
+          }
+        }
+      }
+    } finally {
+      signal?.removeEventListener("abort", cancel);
+    }
+
+    return { content, toolCalls: toolCalls.filter(Boolean), finishReason, usage, model };
+  }
+}

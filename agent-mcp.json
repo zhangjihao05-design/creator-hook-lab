@@ -1,0 +1,7 @@
+{
+  "protocol": "nsdeploy-agent-mcp/v1",
+  "network": "hook_lab",
+  "front_man": "hook_editor",
+  "available": false,
+  "reason": "This is a static bundle; a public MCP facade requires an application host."
+}

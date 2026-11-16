@@ -1,0 +1,98 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Hook Lab · test your opening line before you film it</title>
+    <meta name="description" content="An open agentic website: a writer agent drafts hooks and titles in different styles, a critic agent scores them, and other agentic sites such as Creator Agent Studio can ask it for hooks.">
+    <link rel="stylesheet" href="assistant.css">
+    <link rel="stylesheet" href="styles.css">
+    <script type="module" src="js/page.js"></script>
+    <script type="module" src="site.js"></script>
+  </head>
+  <body class="lab">
+    <header class="hero">
+      <div class="wrap">
+        <p class="eyebrow">Open Agentic Web · runs in your browser</p>
+        <h1>Most viewers decide in 3 seconds. Test your hook first.</h1>
+        <p class="lede">A writer agent drafts openings in different styles, a critic agent scores each one for curiosity, clarity and promise, and picks a winner. Other agentic websites can call this lab too: Creator Agent Studio asks it for hooks before it writes a script.</p>
+        <ol class="team" aria-label="The agent team">
+          <li><strong>Hook Editor</strong><span>runs the test</span></li>
+          <li><strong>Hook Writer</strong><span>hooks + titles, many styles</span></li>
+          <li><strong>Hook Critic</strong><span>scores and picks</span></li>
+          <li><strong>Creator Agent Studio</strong><span>partner site, on request</span></li>
+        </ol>
+      </div>
+    </header>
+
+    <main class="wrap">
+      <section class="card settings" aria-labelledby="settings-heading">
+        <h2 id="settings-heading">1. Your topic</h2>
+        <form id="lab-form" class="form4" novalidate>
+          <label class="wide">Topic
+            <input id="topic" name="topic" maxlength="300" placeholder="e.g. Why most people quit learning a language in month two" required>
+          </label>
+          <p class="examples">Try:
+            <button type="button" class="chip" data-example="Why most people quit learning a language in month two">Language learning</button>
+            <button type="button" class="chip" data-example="Why sleep matters more than caffeine for students">Sleep vs caffeine</button>
+            <button type="button" class="chip" data-example="A one-person business run by AI agents">AI side business</button>
+          </p>
+          <label>Audience <input id="audience" name="audience" maxlength="200" placeholder="e.g. beginners"></label>
+          <label>Platform <select id="platform" name="platform"></select></label>
+          <label>Language <select id="language" name="language"></select></label>
+          <div class="actions">
+            <button type="submit" class="primary">Test hooks</button>
+          </div>
+          <span id="form-status" class="wide" role="status"></span>
+        </form>
+      </section>
+
+      <section id="assistant" class="assistant" aria-labelledby="assistant-heading">
+        <h2 id="assistant-heading">2. Talk to the Hook Editor</h2>
+        <p>Ask for more styles, a shorter hook, or “send the winner to Creator Agent Studio for a script outline and a thread”.</p>
+        <p class="assistant-note">Your messages go to the AI provider you choose in the settings below, on your own key. Before anything is sent to another site, you see a card and choose.</p>
+        <p id="assistant-status" role="status">Connecting the agents… If this message stays, they could not load. You can still use the page directly.</p>
+        <div id="agent-app">
+          <div data-ns-slot="header"></div>
+          <div class="assistant-panels">
+            <div data-ns-slot="chat"></div>
+            <div data-ns-slot="agents"></div>
+          </div>
+          <div data-ns-slot="settings"></div>
+        </div>
+      </section>
+
+      <section class="outputs" aria-labelledby="outputs-heading">
+        <div class="outputs-head">
+          <h2 id="outputs-heading">3. Results</h2>
+          <div class="export">
+            <button type="button" id="copy-md" class="ghost">Copy Markdown</button>
+            <button type="button" id="clear" class="ghost">Clear</button>
+            <span id="export-status" role="status"></span>
+          </div>
+        </div>
+        <div class="grid lab-grid">
+          <article class="card span2" id="hooks-card">
+            <header><h3>Hooks</h3><span class="tag">Writer + Critic</span></header>
+            <div id="hooks-body"></div>
+          </article>
+          <article class="card" id="titles-card">
+            <header><h3>Title ideas</h3><span class="tag">Writer</span></header>
+            <div id="titles-body"></div>
+          </article>
+        </div>
+      </section>
+
+      <section class="card about" aria-labelledby="about-heading">
+        <h2 id="about-heading">Open by design</h2>
+        <p>Hook Lab is an open agentic website. Its agent network is public JSON (<a href="hook_lab.network.json">hook_lab.network.json</a>, listed in <a href="agent-manifest.json">agent-manifest.json</a>). Other agentic websites can call it at <code id="network-url">this-site/hook_lab</code> and get ranked hooks for their own visitors. It links with <a id="studio-link" href="https://creator-agent-studio.pages.dev/">Creator Agent Studio</a>, which turns a topic into a brief, a YouTube script, an X thread and a storyboard.</p>
+        <p class="small">Scores are an AI critic's judgment, not audience data. Hook Lab does not post, research trends or read analytics.</p>
+      </section>
+    </main>
+    <footer class="wrap small">Hook Lab · built for the Open Agentic Web Challenge · runtime: nsDeploy browser runtime (Apache-2.0) · <a href="LICENSE">LICENSE</a><br><span class="copyright">© 2026 Creator Agent Studio — a project by Jinhua Xu and Jinghao Zhang. All rights reserved. This website, its agent-network design, and its content are the original work of the project team. No license is granted to copy, redistribute, or re-publish this site or its code without prior written permission from the authors.</span></footer>
+    <script type="module">
+      const url = new URL("hook_lab", new URL("./", location.href));
+      document.getElementById("network-url").textContent = url.href;
+    </script>
+  </body>
+</html>

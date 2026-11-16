@@ -1,0 +1,37 @@
+{
+  "brand": "Hook Lab",
+  "networks": [
+    {
+      "name": "hook_lab",
+      "front_man": "hook_editor",
+      "hocon": "./hook_lab.network.json",
+      "description": "Give me a topic. My writer drafts hooks and titles in different styles, my critic scores them and picks a winner.",
+      "tags": ["agentified-website", "content-creation", "youtube", "x", "hooks"],
+      "sample_queries": [
+        "Test hooks for a YouTube video about why most people quit learning a language in month two.",
+        "Give me Chinese hooks for an X post about cheap weekend trips around Chengdu.",
+        "Make hook 3 shorter and score it again.",
+        "Send the winning hook to Creator Agent Studio for a script outline and a thread.",
+        "Tell me which hook got the most views last week."
+      ]
+    }
+  ],
+  "llm_router": {"base_url": "https://api.otari.ai/api/v1", "mock": false, "byok_router": "https://api.otari.ai/api/v1"},
+  "allowed_peers": ["https://creator-agent-studio.pages.dev"],
+  "peer_policy": {"mode": "closed", "deny_origins": [], "note": "Local agents and page-local actions, plus the partner sites in allowed_peers, which this site calls only after the visitor agrees on a card."},
+  "agent_mcp": {"protocol": "nsdeploy-agent-mcp/v1", "network": "hook_lab", "front_man": "hook_editor", "available": false, "reason": "This is a static bundle; a public MCP facade requires an application host."},
+  "theme": {"primary": "#1f6f5c"},
+  "linking": {
+    "protocol": "nsdeploy-link/v1",
+    "exports": [{"network": "hook_lab", "front_man": "hook_editor", "aliases": ["hook_lab", "hook_editor"], "url": "hook_lab"}],
+    "imports": [],
+    "link_updates": {"mode": "browser-local"}
+  },
+  "deployment": {"mode": "static", "self_contained_runtime": true, "browser_mock": false, "direct_byok": true, "direct_mcp_requires_cors": true, "public_mcp_facade": false},
+  "actions": {
+    "version": 1,
+    "module": "./site-actions.js",
+    "bridge": "./bridge/action-bridge.html",
+    "agentTools": ["get_lab_state", "set_lab_settings", "save_hooks", "save_hook_scores"]
+  }
+}

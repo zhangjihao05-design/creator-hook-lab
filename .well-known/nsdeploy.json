@@ -1,0 +1,18 @@
+{
+  "protocol": "nsdeploy-link/v1",
+  "exports": [
+    {
+      "network": "hook_lab",
+      "front_man": "hook_editor",
+      "aliases": [
+        "hook_lab",
+        "hook_editor"
+      ],
+      "url": "hook_lab"
+    }
+  ],
+  "imports": [],
+  "link_updates": {
+    "mode": "browser-local"
+  }
+}
